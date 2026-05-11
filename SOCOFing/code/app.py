@@ -132,19 +132,6 @@ with col2:
                         st.toast(f"Tìm thấy {search_result['total_matches']} kết quả!")
                         if st.session_state.get('show_quality_info', False):
                             st.info(f"Điểm chất lượng: {quality_check.get('score', 0.0):.2f} / 1.0")
-
-                    visual_check = search_result.get('visual_check')
-                    if visual_check is not None:
-                        if visual_check.get('passed'):
-                            st.success(
-                                f"Xác thực trực quan qua: SSIM={visual_check.get('ssim', 0.0):.3f}, "
-                                f"ORB matches={visual_check.get('orb_good_matches', 0)}"
-                            )
-                        else:
-                            st.warning(
-                                f"Top-1 bị gắn cờ: SSIM={visual_check.get('ssim', 0.0):.3f}, "
-                                f"ORB matches={visual_check.get('orb_good_matches', 0)}"
-                            )
                 
                 except Exception as e:
                     st.error(f"Tìm kiếm thất bại: {e}")
@@ -180,19 +167,6 @@ with col2:
                 with col_info:
                     st.write(f"**File:** {result['filename']}")
                     st.write(f"**Độ tương đồng:** {result['similarity']:.4f}")
-
-                    visual_check = result.get('visual_check')
-                    if visual_check is not None:
-                        if visual_check.get('passed'):
-                            st.caption(
-                                f"Visual: pass | SSIM={visual_check.get('ssim', 0.0):.3f} | "
-                                f"ORB={visual_check.get('orb_good_matches', 0)}"
-                            )
-                        else:
-                            st.caption(
-                                f"Visual: fail | SSIM={visual_check.get('ssim', 0.0):.3f} | "
-                                f"ORB={visual_check.get('orb_good_matches', 0)}"
-                            )
                     
                     # Progress bar for similarity score
                     st.progress(min(result['similarity'], 1.0))
