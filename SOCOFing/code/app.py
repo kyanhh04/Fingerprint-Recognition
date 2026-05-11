@@ -36,20 +36,19 @@ if 'query_filename' not in st.session_state:
 # ============================================================================
 # 3. Header
 # ============================================================================
-st.title("🔍 Hệ thống nhận dạng vân tay")
+st.title("Hệ thống nhận dạng vân tay")
 st.markdown("---")
 
 # ============================================================================
 # 4. Sidebar Configuration
 # ============================================================================
 with st.sidebar:
-    st.header("⚙️ Cấu hình")
+    st.header("Cấu hình")
     
     top_k = st.slider("Số kết quả hiển thị", 1, 20, config.TOP_K)
-    use_rotation = st.checkbox("Bật tối ưu xoay ảnh", True)
     
     st.markdown("---")
-    st.subheader("🎯 Ngưỡng tìm kiếm")
+    st.subheader("Ngưỡng tìm kiếm")
     
     similarity_threshold = st.slider(
         "Độ tương đồng tối thiểu", 
@@ -64,17 +63,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    if st.button("ℹ️ Thông tin hệ thống"):
-        st.info("""
-        **Tính năng:**
-        - ✓ Phát hiện điểm đặc trưng vân tay
-        - ✓ Phân tích hướng vân (16 hướng, lưới 4x4)
-        - ✓ Tăng cường độ tương phản tự động
-        - ✓ Lọc Gabor (tùy chọn)
-        - ✓ Tối ưu xoay ảnh (±15°)
-        - ✓ Kiểm tra chất lượng ảnh
-        - ✓ Lọc kết quả theo ngưỡng
-        """)
 
 # ============================================================================
 # 5. Main UI - Two Columns
@@ -85,7 +73,7 @@ col1, col2 = st.columns([1, 2])
 # 6. Column 1: Query Image Upload
 # ============================================================================
 with col1:
-    st.subheader("📤 Ảnh truy vấn")
+    st.subheader("Ảnh truy vấn")
     
     uploaded_file = st.file_uploader(
         "Tải lên ảnh vân tay (BMP, JPG, PNG)",
@@ -111,22 +99,17 @@ with col1:
 # 7. Column 2: Search & Results
 # ============================================================================
 with col2:
-    st.subheader("📊 Kết quả tìm kiếm")
+    st.subheader("Kết quả tìm kiếm")
     
     if st.session_state.query_image is not None:
         # Search button
-        if st.button("🔍 Tìm kiếm", use_container_width=True):
+        if st.button("Tìm kiếm", use_container_width=True):
             with st.spinner("Đang tìm kiếm..."):
                 try:
-                    # Show debug info
-                    if st.session_state.query_filename:
-                        st.info(f"🔍 Đang tìm kiếm... (loại trừ: {st.session_state.query_filename})")
-                    
                     # Run search (pass original filename to exclude from results)
                     search_result = search_fingerprint(
                         st.session_state.query_image,
                         top_k=top_k,
-                        use_rotation=use_rotation,
                         db_path=config.DB_PATH,
                         exclude_filename=st.session_state.query_filename
                     )
@@ -137,18 +120,31 @@ with col2:
                     quality_check = search_result.get('quality_check', {})
                     
                     if not quality_check.get('is_valid', True):
-                        st.error("⚠️ Vui lòng tải lên ảnh vân tay rõ ràng.")
+                        st.error("Vui lòng tải lên ảnh vân tay rõ ràng.")
                         if st.checkbox("Hiển thị chi tiết kỹ thuật"):
                             st.info(f"Điểm chất lượng: {quality_check.get('score', 0.0):.2f} / 1.0")
                             st.caption(f"Lý do: {quality_check.get('reason', 'Không rõ')}")
                     elif 'warning' in search_result:
-                        st.warning(f"⚠️ {search_result['warning']}")
+                        st.warning(f"{search_result['warning']}")
                         if 'best_similarity' in search_result:
                             st.info(f"Độ tương đồng cao nhất: {search_result['best_similarity']:.4f} (ngưỡng: {search_result.get('threshold', 0.4):.2f})")
                     else:
-                        st.success(f"✅ Tìm thấy {search_result['total_matches']} kết quả!")
+                        st.toast(f"Tìm thấy {search_result['total_matches']} kết quả!")
                         if st.session_state.get('show_quality_info', False):
                             st.info(f"Điểm chất lượng: {quality_check.get('score', 0.0):.2f} / 1.0")
+
+                    visual_check = search_result.get('visual_check')
+                    if visual_check is not None:
+                        if visual_check.get('passed'):
+                            st.success(
+                                f"Xác thực trực quan qua: SSIM={visual_check.get('ssim', 0.0):.3f}, "
+                                f"ORB matches={visual_check.get('orb_good_matches', 0)}"
+                            )
+                        else:
+                            st.warning(
+                                f"Top-1 bị gắn cờ: SSIM={visual_check.get('ssim', 0.0):.3f}, "
+                                f"ORB matches={visual_check.get('orb_good_matches', 0)}"
+                            )
                 
                 except Exception as e:
                     st.error(f"Tìm kiếm thất bại: {e}")
@@ -160,7 +156,7 @@ with col2:
         results = st.session_state.search_results['results']
         
         # Results table
-        st.markdown("#### 🏆 Kết quả khớp nhất")
+        st.markdown("#### Kết quả khớp nhất")
         
         for idx, result in enumerate(results[:top_k]):
             with st.container(border=True):
@@ -184,6 +180,19 @@ with col2:
                 with col_info:
                     st.write(f"**File:** {result['filename']}")
                     st.write(f"**Độ tương đồng:** {result['similarity']:.4f}")
+
+                    visual_check = result.get('visual_check')
+                    if visual_check is not None:
+                        if visual_check.get('passed'):
+                            st.caption(
+                                f"Visual: pass | SSIM={visual_check.get('ssim', 0.0):.3f} | "
+                                f"ORB={visual_check.get('orb_good_matches', 0)}"
+                            )
+                        else:
+                            st.caption(
+                                f"Visual: fail | SSIM={visual_check.get('ssim', 0.0):.3f} | "
+                                f"ORB={visual_check.get('orb_good_matches', 0)}"
+                            )
                     
                     # Progress bar for similarity score
                     st.progress(min(result['similarity'], 1.0))
@@ -198,54 +207,14 @@ if st.session_state.search_results is not None:
     st.metric("Tổng số kết quả", len(results))
 
 # ============================================================================
-# 9. Debug Section
-# ============================================================================
-if st.checkbox("🔧 Chế độ Debug"):
-    st.subheader("Thông tin Debug")
-    
-    # Configuration
-    with st.expander("Cấu hình hiện tại"):
-        st.write(f"Số kết quả: {top_k}")
-        st.write(f"Tối ưu xoay: {use_rotation}")
-        st.write(f"Ngưỡng tương đồng: {similarity_threshold}")
-    
-    # Quality check results
-    if st.session_state.search_results is not None:
-        quality_check = st.session_state.search_results.get('quality_check', {})
-        if quality_check:
-            with st.expander("Kết quả kiểm tra chất lượng"):
-                st.write(f"Hợp lệ: {quality_check.get('is_valid', 'N/A')}")
-                st.write(f"Điểm: {quality_check.get('score', 0.0):.4f}")
-                st.write(f"Lý do: {quality_check.get('reason', 'N/A')}")
-    
-    # Database stats
-    with st.expander("Thống kê Database"):
-        try:
-            import sqlite3
-            conn = sqlite3.connect(config.DB_PATH)
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT COUNT(*) FROM images')
-            total_images = cursor.fetchone()[0]
-            
-            cursor.execute('SELECT COUNT(*) FROM features')
-            total_features = cursor.fetchone()[0]
-            
-            conn.close()
-            
-            st.write(f"Tổng số ảnh: {total_images}")
-            st.write(f"Tổng số đặc trưng: {total_features}")
-        except Exception as e:
-            st.error(f"Lỗi đọc database: {e}")
-
-# ============================================================================
 # 10. Footer
 # ============================================================================
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; font-size: 0.8em; color: gray;'>
 Hệ thống nhận dạng vân tay | 
-Đặc trưng: Minutiae + Orientation | 
+Đặc trưng: 517D (Minutiae 261D + Orientation 256D) | 
+Metric: Euclidean Distance (normalized) |
 Database: SQLite
 </div>
 """, unsafe_allow_html=True)

@@ -103,7 +103,6 @@ def evaluate_test_set(test_folder, top_k=config.TOP_K, db_path=config.DB_PATH):
             search_result = search_fingerprint(
                 query_path,
                 top_k=top_k,
-                use_rotation=True,
                 db_path=db_path
             )
             

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # 1. Query Database for Matches
 # ============================================================================
-def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, metric='cosine', exclude_filename=None):
+def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, metric='euclidean', exclude_filename=None):
     """
     Search database for matches.
     Returns: list of (image_id, filename, similarity_score, rank)
@@ -28,7 +28,7 @@ def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, 
         query_features: Feature vector of query image
         db_path: Path to database
         top_k: Number of top results to return
-        metric: Similarity metric to use
+        metric: Similarity metric to use (default: euclidean - normalized)
         exclude_filename: Filename to exclude from results (e.g., query image itself)
     """
     conn = sqlite3.connect(db_path)
@@ -148,7 +148,7 @@ def rerank_with_rotation(query_image_path, query_features, search_results,
                 continue
             
             stored_features = np.frombuffer(row[0], dtype=np.float32)
-            score = compute_similarity_score(rotated_features['feature_vector'], stored_features)
+            score = compute_similarity_score(rotated_features['feature_vector'], stored_features, metric='euclidean')
             
             if image_id not in best_scores or score > best_scores[image_id]:
                 best_scores[image_id] = score
@@ -171,7 +171,7 @@ def rerank_with_rotation(query_image_path, query_features, search_results,
 # ============================================================================
 # 3. Full Search Pipeline
 # ============================================================================
-def search_fingerprint(query_image_path, top_k=config.TOP_K, use_rotation=True, 
+def search_fingerprint(query_image_path, top_k=config.TOP_K, 
                       db_path=config.DB_PATH, exclude_filename=None):
     """
     Full search pipeline:
@@ -180,12 +180,10 @@ def search_fingerprint(query_image_path, top_k=config.TOP_K, use_rotation=True,
     3. Extract features
     4. Search database
     5. Filter by similarity threshold
-    6. Re-rank with rotation (optional)
     
     Args:
         query_image_path: Path to query image
         top_k: Number of top results to return
-        use_rotation: Whether to use rotation re-ranking
         db_path: Path to database
         exclude_filename: Original filename to exclude from results (e.g., when querying an image from the database)
     
@@ -228,6 +226,10 @@ def search_fingerprint(query_image_path, top_k=config.TOP_K, use_rotation=True,
     query_features = extract_features.extract_features(preprocessed)
     
     # 4. Search database (exclude query image from results)
+    # By default, exclude the query image itself from DB results
+    if exclude_filename is None:
+        exclude_filename = query_image_path
+
     results = search_database(
         query_features['feature_vector'], 
         db_path=db_path, 
@@ -258,13 +260,7 @@ def search_fingerprint(query_image_path, top_k=config.TOP_K, use_rotation=True,
             'best_similarity': results[0]['similarity'] if results else 0.0
         }
     
-    # 6. Re-rank with rotation
-    if use_rotation:
-        filtered_results = rerank_with_rotation(query_image_path, query_features, filtered_results, db_path)
-        # Re-filter after rotation
-        filtered_results = [r for r in filtered_results if r['similarity'] >= config.SIMILARITY_THRESHOLD]
-    
-    # Return top-k
+    # 6. Return top-k
     final_results = filtered_results[:top_k]
     
     logger.info(f"Found {len(final_results)} matches above threshold")
@@ -332,7 +328,6 @@ if __name__ == "__main__":
     results = search_fingerprint(
         args.query,
         top_k=args.top_k,
-        use_rotation=not args.no_rotation,
         db_path=args.db
     )
     

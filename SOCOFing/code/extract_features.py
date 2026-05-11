@@ -218,8 +218,12 @@ def normalize_features(feature_vector):
 # 7. Distance Metrics
 # ============================================================================
 def euclidean_distance(vec1, vec2):
-    """Euclidean distance between two feature vectors"""
-    return np.linalg.norm(vec1 - vec2)
+    """Euclidean distance between two normalized feature vectors"""
+    # Normalize vectors first to unit length
+    v1_norm = normalize_features(vec1)
+    v2_norm = normalize_features(vec2)
+    # Compute distance on normalized vectors (range: [0, 2])
+    return np.linalg.norm(v1_norm - v2_norm)
 
 def cosine_similarity(vec1, vec2):
     """Cosine similarity (0 to 1, higher is more similar)"""
@@ -231,11 +235,15 @@ def cosine_similarity(vec1, vec2):
 def compute_similarity_score(vec1, vec2, metric='cosine'):
     """
     Compute similarity score.
-    metric: 'cosine' or 'euclidean'
+    metric: 'cosine' or 'euclidean' (normalized)
+    Both metrics now work well with high-dimensional vectors (517D):
+    - Cosine: measures angle between vectors
+    - Euclidean: measures distance between normalized vectors (range 0-2)
     """
     if metric == 'cosine':
         return cosine_similarity(vec1, vec2)
-    else:  # euclidean
-        # Convert distance to similarity (0-1 scale)
+    else:  # euclidean (normalized)
+        # Distance on normalized vectors is in range [0, 2]
+        # Convert to similarity: 1 - (distance / 2)
         dist = euclidean_distance(vec1, vec2)
-        return 1.0 / (1.0 + dist)
+        return 1.0 - (dist / 2.0)  # Maps [0, 2] to [1, 0]
