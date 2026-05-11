@@ -233,7 +233,7 @@ def cmd_webapp(args):
 # ============================================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="Fingerprint Recognition Pipeline with Auto-Approve",
+        description="Fingerprint Recognition Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

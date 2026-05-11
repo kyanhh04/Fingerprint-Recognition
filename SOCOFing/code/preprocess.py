@@ -213,7 +213,163 @@ def preprocess_image(image_path, apply_enhancements=True):
     return result
 
 # ============================================================================
-# 10. Utility: Save Preprocessed Images
+# 10. Quality Check - Verify if image is a valid fingerprint
+# ============================================================================
+def check_fingerprint_quality(preprocessed):
+    """
+    Check if the preprocessed image is likely a valid fingerprint.
+    Returns: (is_valid, quality_score, reason)
+    
+    Checks:
+    1. Ridge density (fingerprints have characteristic ridge patterns)
+    2. Minutiae count (fingerprints should have sufficient minutiae)
+    3. Contrast (fingerprints should have good contrast)
+    4. Edge density (fingerprints have specific edge patterns)
+    5. Texture uniformity (fingerprints have consistent texture)
+    """
+    if preprocessed is None or preprocessed['skeleton'] is None:
+        return False, 0.0, "Preprocessing failed"
+    
+    skeleton = preprocessed['skeleton']
+    enhanced = preprocessed['enhanced']
+    binary = preprocessed['binary']
+    
+    quality_checks = []
+    reasons = []
+    
+    # 1. Check ridge density (skeleton should have reasonable white pixels)
+    # Fingerprints typically have 5-20% ridge density
+    ridge_density = np.count_nonzero(skeleton) / skeleton.size
+    if ridge_density < 0.02:  # Too few ridges
+        quality_checks.append(0.0)
+        reasons.append(f"Very low ridge density ({ridge_density:.4f})")
+    elif ridge_density > 0.25:  # Too many ridges (noise or not fingerprint)
+        quality_checks.append(0.0)
+        reasons.append(f"Very high ridge density ({ridge_density:.4f})")
+    elif ridge_density < 0.05 or ridge_density > 0.20:
+        quality_checks.append(0.3)
+        reasons.append(f"Unusual ridge density ({ridge_density:.4f})")
+    else:
+        quality_checks.append(1.0)
+    
+    # 2. Check contrast (fingerprints should have moderate contrast)
+    # Natural images often have very high contrast
+    contrast = enhanced.std()
+    if contrast < 15:  # Too low contrast
+        quality_checks.append(0.0)
+        reasons.append(f"Very low contrast ({contrast:.2f})")
+    elif contrast > 60:  # Too high contrast (likely natural image)
+        quality_checks.append(0.0)
+        reasons.append(f"Very high contrast ({contrast:.2f} - likely not fingerprint)")
+    elif contrast < 20 or contrast > 50:
+        quality_checks.append(0.4)
+        reasons.append(f"Unusual contrast ({contrast:.2f})")
+    else:
+        quality_checks.append(1.0)
+    
+    # 3. Check edge density using Canny
+    # Fingerprints have moderate edge density
+    edges = cv2.Canny(enhanced, 50, 150)
+    edge_density = np.count_nonzero(edges) / edges.size
+    if edge_density < 0.03:  # Too few edges
+        quality_checks.append(0.0)
+        reasons.append(f"Very low edge density ({edge_density:.4f})")
+    elif edge_density > 0.30:  # Too many edges (complex scene)
+        quality_checks.append(0.0)
+        reasons.append(f"Very high edge density ({edge_density:.4f} - likely complex scene)")
+    elif edge_density < 0.05 or edge_density > 0.25:
+        quality_checks.append(0.3)
+        reasons.append(f"Unusual edge density ({edge_density:.4f})")
+    else:
+        quality_checks.append(1.0)
+    
+    # 4. Check histogram entropy
+    # Fingerprints have moderate entropy (not too uniform, not too complex)
+    hist = cv2.calcHist([enhanced], [0], None, [256], [0, 256])
+    hist_normalized = hist / hist.sum()
+    entropy = -np.sum(hist_normalized * np.log2(hist_normalized + 1e-10))
+    if entropy < 3.5:  # Too uniform
+        quality_checks.append(0.0)
+        reasons.append(f"Very low entropy ({entropy:.2f} - too uniform)")
+    elif entropy > 7.0:  # Too complex (natural images)
+        quality_checks.append(0.0)
+        reasons.append(f"Very high entropy ({entropy:.2f} - too complex)")
+    elif entropy < 4.5 or entropy > 6.5:
+        quality_checks.append(0.4)
+        reasons.append(f"Unusual entropy ({entropy:.2f})")
+    else:
+        quality_checks.append(1.0)
+    
+    # 5. Check binary image characteristics
+    # Fingerprints should have balanced black/white ratio
+    white_ratio = np.count_nonzero(binary) / binary.size
+    if white_ratio < 0.2 or white_ratio > 0.8:
+        quality_checks.append(0.0)
+        reasons.append(f"Unbalanced binary ratio ({white_ratio:.2f})")
+    elif white_ratio < 0.3 or white_ratio > 0.7:
+        quality_checks.append(0.5)
+        reasons.append(f"Unusual binary ratio ({white_ratio:.2f})")
+    else:
+        quality_checks.append(1.0)
+    
+    # 6. Check for color information (fingerprints are grayscale)
+    # If original image has strong color, it's likely not a fingerprint
+    if preprocessed['original'] is not None:
+        original = preprocessed['original']
+        if len(original.shape) == 3:
+            b, g, r = cv2.split(original)
+            color_variance = np.mean([
+                np.std(b - g),
+                np.std(g - r),
+                np.std(r - b)
+            ])
+            if color_variance > 15:  # Strong color content
+                quality_checks.append(0.0)
+                reasons.append(f"Strong color content ({color_variance:.2f} - likely natural image)")
+            elif color_variance > 10:
+                quality_checks.append(0.5)
+                reasons.append(f"Some color content ({color_variance:.2f})")
+            else:
+                quality_checks.append(1.0)
+    
+    # 7. Check texture uniformity using Local Binary Pattern
+    # Fingerprints have consistent directional patterns
+    from skimage.feature import local_binary_pattern
+    lbp = local_binary_pattern(enhanced, 8, 1, method='uniform')
+    lbp_hist, _ = np.histogram(lbp.ravel(), bins=10, range=(0, 10))
+    lbp_hist = lbp_hist.astype(float) / lbp_hist.sum()
+    lbp_entropy = -np.sum(lbp_hist * np.log2(lbp_hist + 1e-10))
+    
+    if lbp_entropy > 3.0:  # Too varied texture (natural scene)
+        quality_checks.append(0.0)
+        reasons.append(f"Very varied texture ({lbp_entropy:.2f} - likely natural scene)")
+    elif lbp_entropy < 1.5:  # Too uniform
+        quality_checks.append(0.3)
+        reasons.append(f"Very uniform texture ({lbp_entropy:.2f})")
+    else:
+        quality_checks.append(1.0)
+    
+    # Calculate overall quality score
+    quality_score = np.mean(quality_checks)
+    
+    # Stricter validation: require at least 60% of checks to pass
+    is_valid = quality_score >= 0.6
+    
+    if not is_valid:
+        reason = "; ".join(reasons) if reasons else "Multiple quality issues detected"
+    else:
+        reason = "Valid fingerprint"
+    
+    logger.info(f"Quality check: score={quality_score:.2f}, valid={is_valid}")
+    logger.debug(f"Details: ridge_density={ridge_density:.4f}, contrast={contrast:.2f}, "
+                f"edge_density={edge_density:.4f}, entropy={entropy:.2f}, "
+                f"white_ratio={white_ratio:.2f}")
+    
+    return is_valid, quality_score, reason
+
+
+# ============================================================================
+# 11. Utility: Save Preprocessed Images
 # ============================================================================
 def save_preprocessed_images(preprocessed, output_dir, image_id):
     """Save all preprocessed stages for visualization"""

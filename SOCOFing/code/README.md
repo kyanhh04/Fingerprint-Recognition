@@ -1,5 +1,5 @@
 # ============================================================================
-# README - Fingerprint Recognition Pipeline with Auto-Approve
+# README - Fingerprint Recognition Pipeline
 # ============================================================================
 
 ## Overview
@@ -10,7 +10,6 @@ Complete end-to-end fingerprint recognition system with:
 - **LBP** (optional auxiliary feature)
 - **CLAHE & Gabor Enhancement** (configurable)
 - **Rotation Re-ranking** (±15°)
-- **AUTO-APPROVE System** (NEW - automatic match verification)
 - **SQLite Database** (persistent storage)
 - **Streamlit UI** (interactive demo)
 
@@ -78,12 +77,6 @@ TOP_K = 5
 ROTATION_RANGE = 15            # ±15 degrees
 ROTATION_STEP = 5
 
-# AUTO-APPROVE (NEW)
-AUTO_APPROVE_ENABLED = True
-AUTO_APPROVE_SCORE_THRESHOLD = 0.75      # If similarity >= 75%
-AUTO_APPROVE_GAP_THRESHOLD = 0.15        # If (top1 - top2) >= 15%
-AUTO_APPROVE_CONFIDENCE_THRESHOLD = 0.80 # Final confidence threshold
-
 # Database
 DB_PATH = "fingerprints.db"
 DATA_FOLDER = "data_processed_bmp"
@@ -116,7 +109,7 @@ INFO - Database building completed: 100 processed, 0 failed
 
 ---
 
-### Step 2: Search for Matches with Auto-Approve
+### Step 2: Search for Matches
 
 #### CLI Search
 
@@ -126,9 +119,6 @@ python search.py --query path/to/query.bmp
 
 # With options
 python search.py --query path/to/query.bmp --top-k 10 --no-rotation
-
-# Save results with auto-approve decisions
-python search.py --query path/to/query.bmp --top-k 5
 ```
 
 **Output example:**
@@ -136,20 +126,16 @@ python search.py --query path/to/query.bmp --top-k 5
 ================================================================================
 Query: path/to/query.bmp
 ================================================================================
-Rank  Filename                   Similarity  AutoApprove  Confidence
+Rank  Filename                   Similarity
 --------------------------------------------------------------
-1     finger001.bmp              0.8523      ✓ YES        0.850
-2     finger012.bmp              0.7234      ✗ NO         0.723
-3     finger045.bmp              0.6891      ✗ NO         0.689
+1     finger001.bmp              0.8523
+2     finger012.bmp              0.7234
+3     finger045.bmp              0.6891
 ...
-
-Summary: 1/5 auto-approved
 
 Top-1 Match:
   Filename: finger001.bmp
   Similarity: 0.8523
-  Auto-Approved: True
-  Reason: Score=0.852, Gap=0.129, Confidence=0.850
 ================================================================================
 ```
 
@@ -169,9 +155,6 @@ results = search_fingerprint(
 for match in results['results']:
     print(f"Rank {match['rank']}: {match['filename']}")
     print(f"  Similarity: {match['similarity']:.4f}")
-    print(f"  Auto-Approved: {match['auto_approve']}")
-    print(f"  Confidence: {match['confidence']:.3f}")
-    print(f"  Reason: {match['reason']}")
 ```
 
 ---
@@ -189,12 +172,10 @@ python evaluate.py --test-folder path/to/test_images/ --output results.csv
 **Metrics computed:**
 - **Top-1 Accuracy:** % of queries where top-1 match is correct
 - **Precision@5:** % of top-5 results that are correct
-- **Auto-Approve Accuracy:** % of auto-approved results that are correct
 
 **Output CSV columns:**
 ```
-query, ground_truth_id, top_1_match, top_1_accuracy, precision_at_5, 
-top_1_auto_approved, auto_approved_accuracy, reason
+query, ground_truth_id, top_1_match, top_1_accuracy, precision_at_5
 ```
 
 **Evaluation report:**
@@ -207,11 +188,6 @@ Aggregate Metrics:
   Total Queries: 50
   Top-1 Accuracy: 0.9200
   Precision@5 (mean): 0.9500 (±0.0400)
-
-Auto-Approve Analysis:
-  Total Auto-Approved: 45
-  Queries with Top-1 Auto-Approved: 42
-  Auto-Approve Accuracy (mean): 0.9778 (±0.0150)
 
 ================================================================================
 ```
@@ -232,51 +208,6 @@ streamlit run app.py
 - Real-time configuration adjustment
 - Visualization of search results
 - Debug mode for advanced users
-
----
-
-## Auto-Approve Logic (NEW)
-
-The auto-approve system makes 3-tier decisions:
-
-### Decision Criteria
-
-```python
-score_pass = similarity >= 0.75  # Score threshold
-gap_pass = (top1 - top2) >= 0.15  # Gap threshold
-
-if score_pass AND gap_pass:
-    confidence = (score + gap) / 2
-    auto_approve = confidence >= 0.80
-else:
-    auto_approve = False
-    confidence = score  # Use score as confidence
-```
-
-### Database Storage
-
-Auto-approve decisions are stored in `auto_approve_decisions` table:
-
-```sql
-CREATE TABLE auto_approve_decisions (
-    decision_id INTEGER PRIMARY KEY,
-    query_image_id INTEGER,
-    match_image_id INTEGER,
-    rank INTEGER,
-    similarity_score REAL,
-    gap_to_next REAL,
-    auto_approve BOOLEAN,
-    confidence REAL,
-    reason TEXT,
-    created_at TIMESTAMP
-);
-```
-
-### Example Decision Reasons
-
-- ✓ `Score=0.852, Gap=0.129, Confidence=0.850` → **AUTO-APPROVED**
-- ✗ `Score PASS (0.82), but Gap FAIL (0.08)` → NOT APPROVED (gap too small)
-- ✗ `Both Score and Gap FAIL (Score=0.65, Gap=0.05)` → NOT APPROVED
 
 ---
 
@@ -337,20 +268,6 @@ feature_vector   (BLOB - concatenated features)
 orientation_hist (BLOB)
 lbp_hist         (BLOB, optional)
 created_at   (TIMESTAMP)
-```
-
-### `auto_approve_decisions` Table (NEW)
-```
-decision_id
-query_image_id
-match_image_id
-rank
-similarity_score
-gap_to_next
-auto_approve     (BOOLEAN)
-confidence       (REAL 0-1)
-reason           (TEXT - explanation)
-created_at       (TIMESTAMP)
 ```
 
 ---

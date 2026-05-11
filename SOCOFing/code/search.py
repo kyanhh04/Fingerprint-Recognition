@@ -1,5 +1,5 @@
 # ============================================================================
-# Search - Query, Retrieve Top-K, Re-rank with Rotation, AUTO-APPROVE
+# Search - Query, Retrieve Top-K, Re-rank with Rotation
 # ============================================================================
 
 import os
@@ -19,10 +19,17 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # 1. Query Database for Matches
 # ============================================================================
-def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, metric='cosine'):
+def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, metric='cosine', exclude_filename=None):
     """
     Search database for matches.
     Returns: list of (image_id, filename, similarity_score, rank)
+    
+    Args:
+        query_features: Feature vector of query image
+        db_path: Path to database
+        top_k: Number of top results to return
+        metric: Similarity metric to use
+        exclude_filename: Filename to exclude from results (e.g., query image itself)
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -43,7 +50,20 @@ def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, 
     
     # Compute similarities
     scores = []
+    excluded_count = 0
+    
     for image_id, filename, feature_blob in rows:
+        # Skip if this is the query image itself
+        # Compare both basename and full filename to handle different cases
+        if exclude_filename:
+            exclude_base = os.path.basename(exclude_filename)
+            filename_base = os.path.basename(filename)
+            
+            if exclude_base == filename_base or exclude_base == filename:
+                logger.info(f"✓ Excluding query image: exclude='{exclude_filename}' vs db='{filename}'")
+                excluded_count += 1
+                continue
+            
         stored_features = np.frombuffer(feature_blob, dtype=np.float32)
         
         try:
@@ -56,6 +76,9 @@ def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, 
         except Exception as e:
             logger.warning(f"Error computing similarity for {filename}: {e}")
             continue
+    
+    if excluded_count > 0:
+        logger.info(f"Excluded {excluded_count} image(s) from search results")
     
     # Sort by similarity (descending)
     scores.sort(key=lambda x: x['similarity'], reverse=True)
@@ -149,15 +172,24 @@ def rerank_with_rotation(query_image_path, query_features, search_results,
 # 3. Full Search Pipeline
 # ============================================================================
 def search_fingerprint(query_image_path, top_k=config.TOP_K, use_rotation=True, 
-                      db_path=config.DB_PATH):
+                      db_path=config.DB_PATH, exclude_filename=None):
     """
     Full search pipeline:
     1. Preprocess query image
-    2. Extract features
-    3. Search database
-    4. Re-rank with rotation (optional)
+    2. Check fingerprint quality
+    3. Extract features
+    4. Search database
+    5. Filter by similarity threshold
+    6. Re-rank with rotation (optional)
     
-    Returns: dict with results
+    Args:
+        query_image_path: Path to query image
+        top_k: Number of top results to return
+        use_rotation: Whether to use rotation re-ranking
+        db_path: Path to database
+        exclude_filename: Original filename to exclude from results (e.g., when querying an image from the database)
+    
+    Returns: dict with results and quality info
     """
     logger.info(f"Searching for: {query_image_path}")
     
@@ -165,28 +197,84 @@ def search_fingerprint(query_image_path, top_k=config.TOP_K, use_rotation=True,
     preprocessed = preprocess.preprocess_image(query_image_path, apply_enhancements=True)
     if preprocessed is None:
         logger.error("Failed to preprocess query image")
-        return None
+        return {
+            'query': query_image_path,
+            'results': [],
+            'total_matches': 0,
+            'error': 'Preprocessing failed',
+            'quality_check': {'is_valid': False, 'score': 0.0, 'reason': 'Preprocessing failed'}
+        }
     
-    # 2. Extract features
+    # 2. Check fingerprint quality
+    is_valid, quality_score, quality_reason = preprocess.check_fingerprint_quality(preprocessed)
+    
+    quality_info = {
+        'is_valid': is_valid,
+        'score': quality_score,
+        'reason': quality_reason
+    }
+    
+    if not is_valid:
+        logger.warning(f"Quality check failed: {quality_reason}")
+        return {
+            'query': query_image_path,
+            'results': [],
+            'total_matches': 0,
+            'warning': f'Image quality check failed: {quality_reason}',
+            'quality_check': quality_info
+        }
+    
+    # 3. Extract features
     query_features = extract_features.extract_features(preprocessed)
     
-    # 3. Search database
-    results = search_database(query_features['feature_vector'], db_path=db_path, top_k=top_k)
+    # 4. Search database (exclude query image from results)
+    results = search_database(
+        query_features['feature_vector'], 
+        db_path=db_path, 
+        top_k=top_k * 2,  # Get more results for filtering
+        exclude_filename=exclude_filename
+    )
     
     if not results:
         logger.warning("No matches found")
-        return {'query': query_image_path, 'results': [], 'total_matches': 0}
+        return {
+            'query': query_image_path,
+            'results': [],
+            'total_matches': 0,
+            'quality_check': quality_info
+        }
     
-    # 4. Re-rank with rotation
+    # 5. Filter by similarity threshold
+    filtered_results = [r for r in results if r['similarity'] >= config.SIMILARITY_THRESHOLD]
+    
+    if not filtered_results:
+        logger.warning(f"No matches above similarity threshold ({config.SIMILARITY_THRESHOLD})")
+        return {
+            'query': query_image_path,
+            'results': [],
+            'total_matches': 0,
+            'warning': f'No matches found with similarity >= {config.SIMILARITY_THRESHOLD}',
+            'quality_check': quality_info,
+            'best_similarity': results[0]['similarity'] if results else 0.0
+        }
+    
+    # 6. Re-rank with rotation
     if use_rotation:
-        results = rerank_with_rotation(query_image_path, query_features, results, db_path)
+        filtered_results = rerank_with_rotation(query_image_path, query_features, filtered_results, db_path)
+        # Re-filter after rotation
+        filtered_results = [r for r in filtered_results if r['similarity'] >= config.SIMILARITY_THRESHOLD]
     
-    logger.info(f"Found {len(results)} matches")
+    # Return top-k
+    final_results = filtered_results[:top_k]
+    
+    logger.info(f"Found {len(final_results)} matches above threshold")
     
     return {
         'query': query_image_path,
-        'results': results,
-        'total_matches': len(results)
+        'results': final_results,
+        'total_matches': len(final_results),
+        'quality_check': quality_info,
+        'threshold': config.SIMILARITY_THRESHOLD
     }
 
 # ============================================================================

@@ -1,5 +1,5 @@
 # ============================================================================
-# Evaluation - Precision@5, Top-1 Accuracy, Auto-Approve Accuracy
+# Evaluation - Precision@5, Top-1 Accuracy
 # ============================================================================
 
 import os
@@ -51,10 +51,7 @@ def evaluate_single_query(query_path, ground_truth_id, search_result):
             'top_1_match_id': None,
             'top_1_accuracy': 0,
             'top_1_score': 0,
-            'top_1_auto_approved': False,
             'precision_at_5': 0,
-            'auto_approved_count': 0,
-            'auto_approved_accuracy': 0,
             'error': 'No results'
         }
     
@@ -71,13 +68,6 @@ def evaluate_single_query(query_path, ground_truth_id, search_result):
                        if get_ground_truth_id(r['filename']) == ground_truth_id)
     precision_at_5 = top_5_matches / min(5, len(results)) if results else 0
     
-    # Auto-approve evaluation
-    auto_approved_count = sum(1 for r in results if r['auto_approve'])
-    auto_approved_correct = sum(1 for r in results 
-                               if r['auto_approve'] and 
-                               get_ground_truth_id(r['filename']) == ground_truth_id)
-    auto_approved_accuracy = auto_approved_correct / auto_approved_count if auto_approved_count > 0 else 0
-    
     return {
         'query': query_path,
         'ground_truth_id': ground_truth_id,
@@ -85,11 +75,7 @@ def evaluate_single_query(query_path, ground_truth_id, search_result):
         'top_1_match_id': top_1_id,
         'top_1_accuracy': 1 if top_1_match else 0,
         'top_1_score': top_1_result['similarity'],
-        'top_1_auto_approved': top_1_result['auto_approve'],
-        'precision_at_5': precision_at_5,
-        'auto_approved_count': auto_approved_count,
-        'auto_approved_accuracy': auto_approved_accuracy,
-        'reason': top_1_result['reason']
+        'precision_at_5': precision_at_5
     }
 
 # ============================================================================
@@ -118,8 +104,7 @@ def evaluate_test_set(test_folder, top_k=config.TOP_K, db_path=config.DB_PATH):
                 query_path,
                 top_k=top_k,
                 use_rotation=True,
-                db_path=db_path,
-                save_decisions=False
+                db_path=db_path
             )
             
             # Evaluate
@@ -127,8 +112,7 @@ def evaluate_test_set(test_folder, top_k=config.TOP_K, db_path=config.DB_PATH):
             results.append(metrics)
             
             logger.info(f"[{idx+1}/{len(test_files)}] Top-1: {metrics['top_1_accuracy']}, "
-                       f"P@5: {metrics['precision_at_5']:.2f}, "
-                       f"AutoApprove: {metrics['top_1_auto_approved']}")
+                       f"P@5: {metrics['precision_at_5']:.2f}")
         
         except Exception as e:
             logger.error(f"Error evaluating {filename}: {e}")
@@ -153,17 +137,12 @@ def compute_aggregated_metrics(evaluation_results):
     
     top_1_accuracies = [r['top_1_accuracy'] for r in valid_results]
     precision_at_5_values = [r['precision_at_5'] for r in valid_results]
-    auto_approved_values = [r['auto_approved_accuracy'] for r in valid_results if r['auto_approved_count'] > 0]
     
     metrics = {
         'total_queries': len(valid_results),
         'top_1_accuracy': np.mean(top_1_accuracies),
         'precision_at_5_mean': np.mean(precision_at_5_values),
-        'precision_at_5_std': np.std(precision_at_5_values),
-        'auto_approve_accuracy_mean': np.mean(auto_approved_values) if auto_approved_values else 0,
-        'auto_approve_accuracy_std': np.std(auto_approved_values) if auto_approved_values else 0,
-        'auto_approved_total': sum(r['auto_approved_count'] for r in valid_results),
-        'auto_approved_queries': sum(1 for r in valid_results if r['top_1_auto_approved'])
+        'precision_at_5_std': np.std(precision_at_5_values)
     }
     
     return metrics
@@ -184,8 +163,8 @@ def save_evaluation_results(evaluation_results, output_path=config.EVALUATION_CS
     
     fieldnames = [
         'query', 'ground_truth_id', 'top_1_match', 'top_1_match_id',
-        'top_1_accuracy', 'top_1_score', 'top_1_auto_approved',
-        'precision_at_5', 'auto_approved_count', 'auto_approved_accuracy', 'reason'
+        'top_1_accuracy', 'top_1_score',
+        'precision_at_5'
     ]
     
     try:
@@ -216,15 +195,9 @@ def print_evaluation_report(aggregated_metrics, evaluation_results):
     print(f"  Precision@5 (mean): {aggregated_metrics.get('precision_at_5_mean', 0):.4f} "
           f"(±{aggregated_metrics.get('precision_at_5_std', 0):.4f})")
     
-    print(f"\nAuto-Approve Analysis:")
-    print(f"  Total Auto-Approved: {aggregated_metrics.get('auto_approved_total', 0)}")
-    print(f"  Queries with Top-1 Auto-Approved: {aggregated_metrics.get('auto_approved_queries', 0)}")
-    print(f"  Auto-Approve Accuracy (mean): {aggregated_metrics.get('auto_approve_accuracy_mean', 0):.4f} "
-          f"(±{aggregated_metrics.get('auto_approve_accuracy_std', 0):.4f})")
-    
     print(f"\nDetailed Results:")
-    print(f"{'Query':<40} {'GT_ID':<10} {'Top-1':<10} {'P@5':<8} {'AutoApp':<8}")
-    print(f"{'-'*80}")
+    print(f"{'Query':<40} {'GT_ID':<10} {'Top-1':<10} {'P@5':<8}")
+    print(f"{'-'*68}")
     
     valid_results = [r for r in evaluation_results if 'error' not in r or r['error'] is None]
     for result in valid_results[:10]:  # Show first 10
@@ -232,14 +205,13 @@ def print_evaluation_report(aggregated_metrics, evaluation_results):
         gt_id = str(result['ground_truth_id'])[:8]
         top1_acc = str(result['top_1_accuracy'])
         p_at_5 = f"{result['precision_at_5']:.2f}"
-        auto_app = "✓" if result['top_1_auto_approved'] else "✗"
         
-        print(f"{query_name:<40} {gt_id:<10} {top1_acc:<10} {p_at_5:<8} {auto_app:<8}")
+        print(f"{query_name:<40} {gt_id:<10} {top1_acc:<10} {p_at_5:<8}")
     
     if len(valid_results) > 10:
         print(f"... and {len(valid_results) - 10} more")
     
-    print(f"{'='*80}\n")
+    print(f"{'='*68}\n")
 
 # ============================================================================
 # 7. Main - CLI Evaluation

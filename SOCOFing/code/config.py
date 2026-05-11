@@ -31,6 +31,8 @@ GRID_SIZE = (4, 4)  # 4x4 grid for orientation calculation
 TOP_K = 5
 ROTATION_RANGE = 15  # ±15 degrees
 ROTATION_STEP = 5    # 5 degree increments
+SIMILARITY_THRESHOLD = 0.4  # Minimum similarity score to consider a match (0.0 - 1.0)
+MIN_QUALITY_SCORE = 0.6  # Minimum quality score for fingerprint images (0.0 - 1.0)
 
 # === Database ===
 DB_PATH = "fingerprints.db"
