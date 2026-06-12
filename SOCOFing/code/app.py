@@ -171,18 +171,12 @@ with col2:
                     # Progress bar for similarity score
                     st.progress(min(result['similarity'], 1.0))
 
-# ============================================================================
-# 8. Bottom Section - Statistics
-# ============================================================================
 st.markdown("---")
 
 if st.session_state.search_results is not None:
     results = st.session_state.search_results['results']
     st.metric("Tổng số kết quả", len(results))
 
-# ============================================================================
-# 10. Footer
-# ============================================================================
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; font-size: 0.8em; color: gray;'>
