@@ -16,6 +16,16 @@ from extract_features import compute_similarity_score
 
 logger = logging.getLogger(__name__)
 
+
+def _get_feature_table(cursor):
+    """Use redesigned feature table, with a fallback for legacy databases."""
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fingerprint_features'"
+    )
+    if cursor.fetchone() is not None:
+        return "fingerprint_features"
+    return "features"
+
 # ============================================================================
 # 1. Query Database for Matches
 # ============================================================================
@@ -33,12 +43,13 @@ def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, 
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    feature_table = _get_feature_table(cursor)
     
     # Fetch all images with their features
-    cursor.execute('''
+    cursor.execute(f'''
         SELECT i.image_id, i.filename, f.feature_vector
         FROM images i
-        JOIN features f ON i.image_id = f.image_id
+        JOIN {feature_table} f ON i.image_id = f.image_id
     ''')
     
     rows = cursor.fetchall()
@@ -60,7 +71,7 @@ def search_database(query_features, db_path=config.DB_PATH, top_k=config.TOP_K, 
             filename_base = os.path.basename(filename)
             
             if exclude_base == filename_base or exclude_base == filename:
-                logger.info(f"✓ Excluding query image: exclude='{exclude_filename}' vs db='{filename}'")
+                logger.info(f"Excluding query image: exclude='{exclude_filename}' vs db='{filename}'")
                 excluded_count += 1
                 continue
             
@@ -102,6 +113,7 @@ def rerank_with_rotation(query_image_path, query_features, search_results,
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    feature_table = _get_feature_table(cursor)
     
     rotation_angles = range(-config.ROTATION_RANGE, config.ROTATION_RANGE + 1, config.ROTATION_STEP)
     best_scores = {}  # image_id -> best_score
@@ -142,7 +154,7 @@ def rerank_with_rotation(query_image_path, query_features, search_results,
         for result in search_results:
             image_id = result['image_id']
             
-            cursor.execute('SELECT feature_vector FROM features WHERE image_id = ?', (image_id,))
+            cursor.execute(f'SELECT feature_vector FROM {feature_table} WHERE image_id = ?', (image_id,))
             row = cursor.fetchone()
             if row is None:
                 continue
@@ -172,7 +184,8 @@ def rerank_with_rotation(query_image_path, query_features, search_results,
 # 3. Full Search Pipeline
 # ============================================================================
 def search_fingerprint(query_image_path, top_k=config.TOP_K, 
-                      db_path=config.DB_PATH, exclude_filename=None):
+                      db_path=config.DB_PATH, exclude_filename=None,
+                      use_rotation=False):
     """
     Full search pipeline:
     1. Preprocess query image
@@ -245,6 +258,9 @@ def search_fingerprint(query_image_path, top_k=config.TOP_K,
             'total_matches': 0,
             'quality_check': quality_info
         }
+
+    if use_rotation:
+        results = rerank_with_rotation(query_image_path, query_features, results, db_path=db_path)
     
     # 5. Filter by similarity threshold
     filtered_results = [r for r in results if r['similarity'] >= config.SIMILARITY_THRESHOLD]

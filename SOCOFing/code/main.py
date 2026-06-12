@@ -163,7 +163,62 @@ def cmd_preprocess(args):
         return 1
 
 # ============================================================================
-# 5. Extract Features Command (Standalone)
+# 5. Preprocess Folder Command (Batch Export)
+# ============================================================================
+def cmd_preprocess_folder(args):
+    """Preprocess all BMP images in a folder and save the stages"""
+    logger.info("=" * 80)
+    logger.info("COMMAND: Preprocess Folder")
+    logger.info("=" * 80)
+
+    from preprocess import preprocess_image, save_preprocessed_images
+
+    try:
+        if not os.path.exists(args.data_folder):
+            logger.error(f"Data folder not found: {args.data_folder}")
+            return 1
+
+        os.makedirs(args.output_dir, exist_ok=True)
+
+        bmp_files = [
+            f for f in os.listdir(args.data_folder)
+            if f.lower().endswith('.bmp')
+        ]
+
+        logger.info(f"Found {len(bmp_files)} BMP files in {args.data_folder}")
+        processed = 0
+        failed = 0
+
+        for idx, filename in enumerate(bmp_files):
+            image_path = os.path.join(args.data_folder, filename)
+            image_id = os.path.splitext(filename)[0]
+
+            try:
+                preprocessed = preprocess_image(image_path, apply_enhancements=True)
+                if preprocessed is None:
+                    failed += 1
+                    continue
+
+                save_preprocessed_images(preprocessed, args.output_dir, image_id)
+                processed += 1
+
+                if processed % 25 == 0:
+                    logger.info(f"Processed {processed}/{len(bmp_files)} images")
+
+            except Exception as e:
+                logger.error(f"Error preprocessing {filename}: {e}")
+                failed += 1
+
+        logger.info(f"Batch preprocessing complete: {processed} processed, {failed} failed")
+        logger.info(f"Saved processed images to: {args.output_dir}")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Batch preprocessing failed: {e}")
+        return 1
+
+# ============================================================================
+# 6. Extract Features Command (Standalone)
 # ============================================================================
 def cmd_extract(args):
     """Extract features from single image (for debugging)"""
@@ -206,7 +261,7 @@ def cmd_extract(args):
         return 1
 
 # ============================================================================
-# 6. Web App Command
+# 7. Web App Command
 # ============================================================================
 def cmd_webapp(args):
     """Launch Streamlit web app"""
@@ -229,7 +284,7 @@ def cmd_webapp(args):
         return 1
 
 # ============================================================================
-# 7. Main CLI Parser
+# 8. Main CLI Parser
 # ============================================================================
 def main():
     parser = argparse.ArgumentParser(
@@ -249,6 +304,9 @@ Examples:
   
   # 4. Preprocess (debug)
   python main.py preprocess --image path/to/image.bmp
+
+    # 4b. Preprocess a whole folder
+    python main.py preprocess-folder --data-folder ../Real --output-dir output/preprocess
   
   # 5. Extract features (debug)
   python main.py extract --image path/to/image.bmp
@@ -299,6 +357,14 @@ Examples:
     prep_parser.add_argument('--output-dir', type=str, default=None,
                             help='Output directory for preprocessed stages')
     prep_parser.set_defaults(func=cmd_preprocess)
+
+    # ========== Preprocess Folder ==========
+    prep_folder_parser = subparsers.add_parser('preprocess-folder', help='Preprocess all images in a folder')
+    prep_folder_parser.add_argument('--data-folder', type=str, default=config.DATA_FOLDER,
+                                    help=f'Input BMP folder (default: {config.DATA_FOLDER})')
+    prep_folder_parser.add_argument('--output-dir', type=str, default='output/preprocess',
+                                    help='Output directory for processed images')
+    prep_folder_parser.set_defaults(func=cmd_preprocess_folder)
     
     # ========== Extract ==========
     ext_parser = subparsers.add_parser('extract', help='Extract features from image (debug)')
