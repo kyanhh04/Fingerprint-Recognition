@@ -376,7 +376,7 @@ def save_preprocessed_images(preprocessed, output_dir, image_id):
     import os
     os.makedirs(output_dir, exist_ok=True)
     
-    stages = ['original', 'grayscale', 'resized', 'enhanced', 'binary', 'skeleton']
+    stages = ['original', 'grayscale', 'resized', 'segmented', 'enhanced', 'binary', 'skeleton', 'mask']
     for stage in stages:
         if preprocessed[stage] is not None:
             path = os.path.join(output_dir, f"{image_id}_{stage}.png")
